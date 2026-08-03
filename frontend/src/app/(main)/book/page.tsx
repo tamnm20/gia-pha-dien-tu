@@ -363,27 +363,72 @@ export default function BookPage() {
                     </section>
                 </div>
             )}
+            <link 
+            rel="stylesheet" 
+            href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&family=Playfair+Display:ital,wght@0,600..900;1,600..900&display=swap" 
+            />
+            <style>{`
+            /* Ép tất cả văn bản và phần tử con trong sách dùng font Lora */
+            .book-content, 
+            .book-content *,
+            .book-page,
+            .book-page * { 
+                font-family: 'Lora', 'Georgia', serif !important; 
+            }
 
+            /* Ép các thẻ tiêu đề, bìa sách dùng font Playfair Display cho sang trọng */
+            .book-content h1, 
+            .book-content h2, 
+            .book-content h3,
+            .book-content h4,
+            .book-page h1,
+            .book-page h2,
+            .book-page h3 { 
+                font-family: 'Playfair Display', 'Times New Roman', serif !important; 
+            }
+            `}</style>
             <style dangerouslySetInnerHTML={{
                 __html: `
-                @import url('https://fonts.googleapis.com/css2?family=Noto+Serif:ital,wght@0,400;0,700;1,400&display=swap');
-
-                .book-content { font-family: 'Noto Serif', 'Georgia', serif; }
 
                 @media print {
-                    body { margin: 0; padding: 0; }
-                    .no-print { display: none !important; }
-                    .book-content { max-width: none; }
+                    /* 1. RESET TẤT CẢ OVERFLOW VỀ VISIBLE (QUAN TRỌNG NHẤT) */
+                    body, html, .overflow-hidden { 
+                        margin: 0; 
+                        padding: 0; 
+                        overflow: visible !important; 
+                        height: auto !important;
+                    }
+
+                    /* 2. ĐẢM BẢO LAYOUT DẠNG BLOCK */
+                    .book-content { 
+                        display: block !important;
+                        max-width: none !important;
+                    }
+
                     @page {
                         size: A4;
                         margin: 20mm 18mm 25mm 18mm;
                     }
+
+                    /* 3. ẨN CÁC PHẦN KHÔNG CẦN IN */
+                    aside, header, .no-print, .page-label {
+                        display: none !important;
+                    }
+                    
                     .cover-page { min-height: auto; padding: 40mm 15mm; }
-                    .page-break { page-break-before: always; }
-                    .person-entry { page-break-inside: avoid; }
-                    .chapter-header { page-break-after: avoid; }
-                    h2, h3 { page-break-after: avoid; }
-                    .page-label { display: none; }
+
+                    /* 4. SỬ DỤNG CÚ PHÁP NGẮT TRANG HIỆN ĐẠI */
+                    .page-break { 
+                        break-before: page; 
+                    }
+                    
+                    .person-entry { 
+                        break-inside: avoid; 
+                    }
+                    
+                    .chapter-header, h2, h3 { 
+                        break-after: avoid; 
+                    }
                 }
 
                 @media screen {
@@ -393,7 +438,6 @@ export default function BookPage() {
                         transform: translateX(-50%);
                         background: white; padding: 0 12px;
                         font-size: 11px; color: ${t.primary};
-                        font-family: 'Noto Serif', serif;
                     }
                 }
             ` }} />
