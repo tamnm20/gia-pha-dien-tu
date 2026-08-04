@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // <-- Thêm useEffect vào đây
 import { useAuth } from '@/components/auth-provider';
 
 const navItems = [
@@ -45,6 +45,13 @@ export function Sidebar() {
     const pathname = usePathname();
     const [collapsed, setCollapsed] = useState(false);
     const { isAdmin } = useAuth();
+
+    // Tự động thu gọn thanh Sidebar khi người dùng vào trang Sách Gia phả
+    useEffect(() => {
+        if (pathname === '/book' || pathname.startsWith('/book/')) {
+            setCollapsed(true);
+        }
+    }, [pathname]);
 
     return (
         <aside

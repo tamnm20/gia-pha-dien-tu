@@ -17,6 +17,7 @@ function dbRowToTreeNode(row: Record<string, unknown>): TreeNode {
         birthYear: row.birth_year as number | undefined,
         deathYear: row.death_year as number | undefined,
         generation: row.generation as number,
+        chi: row.chi as number | undefined,
         isLiving: row.is_living as boolean,
         isPrivacyFiltered: row.is_privacy_filtered as boolean,
         isPatrilineal: row.is_patrilineal as boolean,
@@ -40,7 +41,7 @@ function dbRowToTreeFamily(row: Record<string, unknown>): TreeFamily {
 export async function fetchPeople(): Promise<TreeNode[]> {
     const { data, error } = await supabase
         .from('people')
-        .select('handle, display_name, gender, birth_year, death_year, generation, is_living, is_privacy_filtered, is_patrilineal, families, parent_families')
+        .select('handle, display_name, gender, birth_year, death_year, generation, chi,  is_living, is_privacy_filtered, is_patrilineal, families, parent_families')
         .order('generation')
         .order('handle');
 
@@ -184,6 +185,7 @@ export async function updatePerson(
         isLiving?: boolean;
         gender?: number;
         generation?: number;
+        chi?: number | null;
         isPatrilineal?: boolean;
         phone?: string | null;
         email?: string | null;
@@ -202,6 +204,7 @@ export async function updatePerson(
     if (fields.isLiving !== undefined) dbFields.is_living = fields.isLiving;
     if (fields.gender !== undefined) dbFields.gender = fields.gender;
     if (fields.generation !== undefined) dbFields.generation = fields.generation;
+    if (fields.chi !== undefined) dbFields.chi = fields.chi;
     if (fields.isPatrilineal !== undefined) dbFields.is_patrilineal = fields.isPatrilineal;
     if (fields.phone !== undefined) dbFields.phone = fields.phone;
     if (fields.email !== undefined) dbFields.email = fields.email;
@@ -226,6 +229,7 @@ export async function addPerson(person: {
     displayName: string;
     gender: number;
     generation: number;
+    chi?: number | null;
     birthYear?: number | null;
     deathYear?: number | null;
     isLiving?: boolean;
@@ -239,6 +243,7 @@ export async function addPerson(person: {
             display_name: person.displayName,
             gender: person.gender,
             generation: person.generation,
+            chi: person.chi || null,
             birth_year: person.birthYear || null,
             death_year: person.deathYear || null,
             is_living: person.isLiving ?? true,

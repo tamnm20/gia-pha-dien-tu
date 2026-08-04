@@ -15,6 +15,7 @@ export interface TreeNode {
     displayName: string;
     gender: number;
     generation: number;
+    chi?: number;
     birthYear?: number;
     deathYear?: number;
     isLiving: boolean;

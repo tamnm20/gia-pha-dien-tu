@@ -1785,6 +1785,7 @@ function EditorPanel({ selectedCard, selectedFamilyCard, draftPerson, draftFamil
     const [editName, setEditName] = useState('');
     const [editGender, setEditGender] = useState<number>(1);
     const [editGeneration, setEditGeneration] = useState<number>(1);
+    const [editChi, setEditChi] = useState('');
     const [editIsPatrilineal, setEditIsPatrilineal] = useState<boolean>(true);
     const [editBirthYear, setEditBirthYear] = useState('');
     const [editDeathYear, setEditDeathYear] = useState('');
@@ -1811,6 +1812,7 @@ function EditorPanel({ selectedCard, selectedFamilyCard, draftPerson, draftFamil
             setEditName(person.displayName || '');
             setEditGender(person.gender ?? 1);
             setEditGeneration(person.generation ?? 1);
+            setEditChi(person.chi?.toString() || '');
             setEditIsPatrilineal(person.isPatrilineal ?? true);
             setEditBirthYear(person.birthYear?.toString() || '');
             setEditDeathYear(person.deathYear?.toString() || '');
@@ -1839,6 +1841,8 @@ function EditorPanel({ selectedCard, selectedFamilyCard, draftPerson, draftFamil
         if (editName !== person.displayName) fields.displayName = editName;
         if (editGender !== person.gender) fields.gender = editGender;
         if (editGeneration !== person.generation) fields.generation = editGeneration;
+        const newChi = editChi ? parseInt(editChi) : null;
+        if (newChi !== (person.chi ?? null)) fields.chi = newChi;
         if (editIsPatrilineal !== person.isPatrilineal) fields.isPatrilineal = editIsPatrilineal;
         if (editIsLiving !== (person.isLiving ?? true)) fields.isLiving = editIsLiving;
 
@@ -2043,20 +2047,25 @@ function EditorPanel({ selectedCard, selectedFamilyCard, draftPerson, draftFamil
                             value={editName} onChange={e => { setEditName(e.target.value); setDirty(true); }} />
                     </div>
 
-                    {/* Giới tính & Đời thứ */}
+                    {/* Giới tính, Đời & Thứ bậc */}
                     <div className="flex gap-2">
                         <div className="flex-1">
-                            <label className="text-xs font-medium text-muted-foreground">Giới tính (gender)</label>
+                            <label className="text-xs font-medium text-muted-foreground">Giới tính</label>
                             <select className="w-full border rounded px-2 py-1.5 text-xs bg-background mt-0.5"
                                 value={editGender} onChange={e => { setEditGender(Number(e.target.value)); setDirty(true); }}>
                                 <option value={1}>Nam (1)</option>
                                 <option value={2}>Nữ (2)</option>
                             </select>
                         </div>
-                        <div className="flex-1">
-                            <label className="text-xs font-medium text-muted-foreground">Đời thứ (generation)</label>
+                        <div className="w-16">
+                            <label className="text-xs font-medium text-muted-foreground">Đời</label>
                             <input type="number" className="w-full border rounded px-2 py-1.5 text-xs bg-background mt-0.5"
                                 value={editGeneration} onChange={e => { setEditGeneration(Number(e.target.value)); setDirty(true); }} />
+                        </div>
+                        <div className="w-16">
+                            <label className="text-xs font-medium text-muted-foreground" title="Con cả (1), con thứ hai (2)...">Thứ bậc</label>
+                            <input type="number" className="w-full border rounded px-2 py-1.5 text-xs bg-background mt-0.5" placeholder="-"
+                                value={editChi} onChange={e => { setEditChi(e.target.value); setDirty(true); }} />
                         </div>
                     </div>
 

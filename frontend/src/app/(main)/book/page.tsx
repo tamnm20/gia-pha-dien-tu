@@ -78,6 +78,7 @@ export default function BookPage() {
                     families = treeData.families;
                 }
             } catch { /* fallback */ }
+            
             // Fallback: use mock data when Supabase is not configured
             if (people.length === 0) {
                 const { getMockTreeData } = await import('@/lib/mock-data');
@@ -85,14 +86,103 @@ export default function BookPage() {
                 people = mock.people;
                 families = mock.families;
             }
+
+            // ═══ BẮT ĐẦU LOGIC SẮP XẾP DUYỆT ĐÚNG THEO NHÁNH VÀ THỨ BẬC ═══
+            const peopleMap = new Map<string, TreeNode>();
+            people.forEach(p => peopleMap.set(p.handle, p));
+
+            // 1. Sắp xếp danh sách con trong MỖI GIA ĐÌNH theo Thứ bậc (chi) -> Năm sinh
+            families.forEach(fam => {
+                fam.children.sort((handleA, handleB) => {
+                    const pA = peopleMap.get(handleA);
+                    const pB = peopleMap.get(handleB);
+                    const chiA = pA?.chi ?? 999;
+                    const chiB = pB?.chi ?? 999;
+                    if (chiA !== chiB) return chiA - chiB;
+                    return (pA?.birthYear ?? 9999) - (pB?.birthYear ?? 9999);
+                });
+            });
+
+            // 2. Chấm điểm (order) tuyệt đối cho từng người để giữ đúng Nhánh (Cành)
+            const orderMap = new Map<string, number>();
+            const maxGen = Math.max(0, ...people.map(p => p.generation));
+            
+            let currentGenSorted: string[] = [];
+
+            for (let gen = 1; gen <= maxGen; gen++) {
+                const genPeople = people.filter(p => p.generation === gen);
+
+                if (gen === 1) {
+                    genPeople.sort((a, b) => {
+                        const chiA = a.chi ?? 999;
+                        const chiB = b.chi ?? 999;
+                        if (chiA !== chiB) return chiA - chiB;
+                        return (a.birthYear ?? 9999) - (b.birthYear ?? 9999);
+                    });
+                    currentGenSorted = genPeople.map(p => p.handle);
+                } else {
+                    const nextGenSorted: string[] = [];
+                    
+                    // Lần theo thứ tự của cha mẹ ở đời trước để gom nhóm các con
+                    for (const parentHandle of currentGenSorted) {
+                        // FIX TẠI ĐÂY: Tìm nhánh trực tiếp từ bảng Gia đình, bỏ qua mảng lỗi của người cha
+                        const parentFams = families.filter(f => f.fatherHandle === parentHandle || f.motherHandle === parentHandle);
+                        
+                        for (const fam of parentFams) {
+                            for (const childHandle of fam.children) {
+                                const child = peopleMap.get(childHandle);
+                                if (child && child.generation === gen && !nextGenSorted.includes(childHandle)) {
+                                    nextGenSorted.push(childHandle);
+                                }
+                            }
+                        }
+                    }
+
+                    // Xử lý những người bị mồ côi (chưa được nối dây trên cây)
+                    const orphans = genPeople.filter(p => !nextGenSorted.includes(p.handle));
+                    orphans.sort((a, b) => {
+                        const chiA = a.chi ?? 999;
+                        const chiB = b.chi ?? 999;
+                        if (chiA !== chiB) return chiA - chiB;
+                        return (a.birthYear ?? 9999) - (b.birthYear ?? 9999);
+                    });
+
+                    nextGenSorted.push(...orphans.map(o => o.handle));
+                    currentGenSorted = nextGenSorted;
+                }
+
+                currentGenSorted.forEach((handle, index) => {
+                    orderMap.set(handle, index);
+                });
+            }
+
+            // Sắp xếp lại mảng gốc
+            people.sort((a, b) => {
+                if (a.generation !== b.generation) return a.generation - b.generation;
+                const orderA = orderMap.get(a.handle) ?? 9999;
+                const orderB = orderMap.get(b.handle) ?? 9999;
+                return orderA - orderB;
+            });
+            // ═══ KẾT THÚC LOGIC SẮP XẾP ═══
+
             const familyName = people.length > 0 ? (people[0].displayName?.split(' ').slice(0, 2).join(' ') || 'Dòng Họ') : 'Dòng Họ';
             const data = generateBookData(people, families, familyName);
+            
+            // ÉP CỨNG TRẬT TỰ MỘT LẦN NỮA: Đề phòng thuật toán tạo sách làm loạn
+            data.chapters.forEach(ch => {
+                ch.members.sort((a, b) => {
+                    const orderA = orderMap.get(a.handle) ?? 9999;
+                    const orderB = orderMap.get(b.handle) ?? 9999;
+                    return orderA - orderB;
+                });
+            });
+
             setBookData(data);
             setLoading(false);
         };
+        
         fetchAndGenerate();
     }, []);
-
     if (loading) {
         return (
             <div className="flex items-center justify-center min-h-screen">
@@ -335,29 +425,29 @@ export default function BookPage() {
 
             {/* ═══ NORMAL READING MODE ═══ */}
             {!previewMode && (
-                <div className="book-content max-w-[210mm] mx-auto bg-white"
+                <div className="book-content max-w-[210mm] mx-auto bg-white shadow-sm sm:shadow-none"
                     style={{ fontFamily: "'Noto Serif', Georgia, serif", color: t.text }}>
 
-                    <CoverPage bookData={bookData} theme={t} />
+                    <CoverPage bookData={bookData} theme={t} responsive={true} />
 
-                    <section id="toc" className="page-break px-8 py-12">
+                    <section id="toc" className="page-break px-4 sm:px-8 print:px-8 py-8 sm:py-12 print:py-12">
                         <span className="page-label">Trang 2</span>
                         <TocContent bookData={bookData} theme={t} />
                     </section>
 
                     {bookData.chapters.map((ch, ci) => (
-                        <section key={ch.generation} id={`gen-${ch.generation}`} className="page-break px-8 py-12">
+                        <section key={ch.generation} id={`gen-${ch.generation}`} className="page-break px-4 sm:px-8 print:px-8 py-8 sm:py-12 print:py-12">
                             <span className="page-label">Trang {ci + 3}</span>
-                            <ChapterContent chapter={ch} theme={t} />
+                            <ChapterContent chapter={ch} theme={t} responsive={true} />
                         </section>
                     ))}
 
-                    <section id="appendix" className="page-break px-8 py-12">
+                    <section id="appendix" className="page-break px-4 sm:px-8 print:px-8 py-8 sm:py-12 print:py-12">
                         <span className="page-label">Trang {bookData.chapters.length + 3}</span>
-                        <AppendixContent bookData={bookData} theme={t} />
+                        <AppendixContent bookData={bookData} theme={t} responsive={true} />
                     </section>
 
-                    <section id="closing" className="page-break px-8 py-16 text-center" style={{ fontFamily: "'Noto Serif', Georgia, serif" }}>
+                    <section id="closing" className="page-break px-4 sm:px-8 print:px-8 py-10 sm:py-16 print:py-16 text-center" style={{ fontFamily: "'Noto Serif', Georgia, serif" }}>
                         <span className="page-label">Trang {bookData.chapters.length + 4}</span>
                         <ClosingContent bookData={bookData} theme={t} />
                     </section>
@@ -477,18 +567,18 @@ function BookSection({ sectionId, bookData, theme: t, memberStart, memberEnd, is
 
 // ═══ Section Components ═══
 
-function CoverPage({ bookData, theme: t }: { bookData: BookData; theme: Theme }) {
+function CoverPage({ bookData, theme: t, responsive = false }: { bookData: BookData; theme: Theme; responsive?: boolean }) {
     return (
-        <section className="cover-page flex flex-col items-center justify-center text-center px-8 py-16 min-h-[280mm]">
-            <div className="flex-1 flex flex-col items-center justify-center">
-                <div className="w-24 h-0.5 mb-8" style={{ background: t.primary }} />
-                <h1 className="text-4xl font-bold tracking-wider font-serif mb-2" style={{ color: t.primary }}>
+        <section className={`cover-page flex flex-col items-center justify-center text-center py-16 min-h-[280mm] ${responsive ? 'px-4 sm:px-8 print:px-8' : 'px-8'}`}>
+            <div className="flex-1 flex flex-col items-center justify-center w-full">
+                <div className="w-24 h-0.5 mb-8 mx-auto" style={{ background: t.primary }} />
+                <h1 className={`font-bold tracking-wider font-serif mb-2 ${responsive ? 'text-3xl sm:text-4xl print:text-4xl' : 'text-4xl'}`} style={{ color: t.primary }}>
                     GIA PHẢ
                 </h1>
-                <h2 className="text-5xl font-bold tracking-widest font-serif mb-8" style={{ color: t.secondary }}>
+                <h2 className={`font-bold tracking-widest font-serif mb-8 ${responsive ? 'text-3xl sm:text-5xl print:text-5xl' : 'text-5xl'}`} style={{ color: t.secondary }}>
                     DÒNG HỌ {bookData.familyName.toUpperCase()}
                 </h2>
-                <div className="w-32 h-0.5 mb-10" style={{ background: t.primary }} />
+                <div className="w-32 h-0.5 mb-10 mx-auto" style={{ background: t.primary }} />
                 <div className="space-y-2 text-lg font-serif" style={{ color: t.textMuted }}>
                     <p>{bookData.totalGenerations} đời · {bookData.totalMembers} thành viên</p>
                     <p className="text-base">{bookData.totalPatrilineal} người chính tộc</p>
@@ -534,12 +624,18 @@ function TocContent({ bookData, theme: t }: { bookData: BookData; theme: Theme }
     );
 }
 
-function ChapterContent({ chapter, theme: t, members, startIndex, showHeader }: {
+function ChapterContent({ chapter, theme: t, members, startIndex, showHeader, responsive = false }: {
     chapter: BookChapter; theme: Theme;
-    members?: BookPerson[]; startIndex?: number; showHeader?: boolean;
+    members?: BookPerson[]; startIndex?: number; showHeader?: boolean; responsive?: boolean;
 }) {
     const displayMembers = members ?? chapter.members;
     const offset = startIndex ?? 0;
+    
+    // Thêm print:grid-cols-2 để luôn ép 2 cột trên giấy in
+    const gridClass = responsive 
+        ? "grid grid-cols-1 md:grid-cols-2 print:grid-cols-2 gap-4" 
+        : "grid grid-cols-2 gap-4";
+
     return (
         <>
             {showHeader !== false && (
@@ -559,7 +655,7 @@ function ChapterContent({ chapter, theme: t, members, startIndex, showHeader }: 
                     {chapter.title} (tiếp theo)
                 </p>
             )}
-            <div className="grid grid-cols-2 gap-4">
+            <div className={gridClass}>
                 {displayMembers.map((person, idx) => (
                     <PersonEntry key={person.handle} person={person} index={offset + idx + 1} theme={t} />
                 ))}
@@ -631,22 +727,33 @@ function PersonEntry({ person, index, theme: t }: { person: BookPerson; index: n
     );
 }
 
-function AppendixContent({ bookData, theme: t, startIdx, endIdx, showHeader }: {
+function AppendixContent({ bookData, theme: t, startIdx, endIdx, showHeader, responsive = false }: {
     bookData: BookData; theme: Theme;
-    startIdx?: number; endIdx?: number; showHeader?: boolean;
+    startIdx?: number; endIdx?: number; showHeader?: boolean; responsive?: boolean;
 }) {
-    const patrilineal = bookData.nameIndex.filter(e => e.isPatrilineal);
-    const ngoaitoc = bookData.nameIndex.filter(e => !e.isPatrilineal);
-    // Combined sorted list for pagination
+    // 1. Lọc Nội tộc và SẮP XẾP THEO ĐỜI (generation tăng dần)
+    const patrilineal = bookData.nameIndex
+        .filter(e => e.isPatrilineal)
+        .sort((a, b) => a.generation - b.generation);
+
+    // 2. Lọc Ngoại tộc và SẮP XẾP THEO ĐỜI (generation tăng dần)
+    const ngoaitoc = bookData.nameIndex
+        .filter(e => !e.isPatrilineal)
+        .sort((a, b) => a.generation - b.generation);
+
     const allEntries = [...patrilineal, ...ngoaitoc];
     const start = startIdx ?? 0;
     const end = endIdx ?? allEntries.length;
     const pageEntries = allEntries.slice(start, end);
 
-    // Determine section boundaries
     const patriEnd = patrilineal.length;
     const showPatriHeader = start < patriEnd;
     const showNgoaiHeader = end > patriEnd && start < allEntries.length;
+
+    // Thêm print:columns-3 để luôn ép 3 cột trên giấy in
+    const colClass = responsive 
+        ? "columns-1 sm:columns-2 md:columns-3 print:columns-3 gap-4" 
+        : "columns-3 gap-4";
 
     return (
         <>
@@ -655,7 +762,10 @@ function AppendixContent({ bookData, theme: t, startIdx, endIdx, showHeader }: {
                     <h2 className="text-2xl font-bold text-center font-serif mb-2 tracking-wide" style={{ color: t.primary }}>
                         PHỤ LỤC
                     </h2>
-                    <p className="text-center font-serif mb-6" style={{ color: t.textMuted }}>Chỉ mục tên theo thứ tự A-Z</p>
+                    {/* Đổi dòng ghi chú A-Z thành Theo thế hệ */}
+                    <p className="text-center font-serif mb-6" style={{ color: t.textMuted }}>
+                        Chỉ mục tên theo thứ tự thế hệ (từ Đời 1)
+                    </p>
                     <div className="w-16 h-0.5 mx-auto mb-8" style={{ background: t.primary }} />
                 </>
             )}
@@ -665,7 +775,6 @@ function AppendixContent({ bookData, theme: t, startIdx, endIdx, showHeader }: {
                 </p>
             )}
 
-            {/* Render entries with section headers inline */}
             {showPatriHeader && start === 0 && (
                 <h3 className="text-base font-bold font-serif mb-3 tracking-wide pb-2"
                     style={{ color: t.primary, borderBottom: `1px solid ${t.border}` }}>
@@ -673,7 +782,7 @@ function AppendixContent({ bookData, theme: t, startIdx, endIdx, showHeader }: {
                 </h3>
             )}
 
-            <div className="columns-3 gap-4 text-[11px] font-serif">
+            <div className={`${colClass} text-[11px] font-serif`}>
                 {pageEntries.map((entry, i) => {
                     const globalIdx = start + i;
                     const isNgoaiStart = globalIdx === patriEnd;
