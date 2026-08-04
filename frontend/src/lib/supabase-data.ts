@@ -182,6 +182,9 @@ export async function updatePerson(
         birthYear?: number | null;
         deathYear?: number | null;
         isLiving?: boolean;
+        gender?: number;
+        generation?: number;
+        isPatrilineal?: boolean;
         phone?: string | null;
         email?: string | null;
         currentAddress?: string | null;
@@ -191,12 +194,15 @@ export async function updatePerson(
         notes?: string | null;
     }
 ): Promise<void> {
-    // Convert camelCase → snake_case for DB
+    // Convert camelCase → snake_case cho DB
     const dbFields: Record<string, unknown> = {};
     if (fields.displayName !== undefined) dbFields.display_name = fields.displayName;
     if (fields.birthYear !== undefined) dbFields.birth_year = fields.birthYear;
     if (fields.deathYear !== undefined) dbFields.death_year = fields.deathYear;
     if (fields.isLiving !== undefined) dbFields.is_living = fields.isLiving;
+    if (fields.gender !== undefined) dbFields.gender = fields.gender;
+    if (fields.generation !== undefined) dbFields.generation = fields.generation;
+    if (fields.isPatrilineal !== undefined) dbFields.is_patrilineal = fields.isPatrilineal;
     if (fields.phone !== undefined) dbFields.phone = fields.phone;
     if (fields.email !== undefined) dbFields.email = fields.email;
     if (fields.currentAddress !== undefined) dbFields.current_address = fields.currentAddress;
@@ -284,4 +290,91 @@ export async function addFamily(family: {
         return { error: error.message };
     }
     return { error: null };
+}
+
+/** * Đổi mã Handle của một người 
+ * (Cập nhật cả bảng people và các liên kết trong bảng families) 
+ */
+export async function changePersonHandle(
+    oldHandle: string,
+    newHandle: string,
+    currentFamilies: TreeFamily[]
+): Promise<{ error: string | null }> {
+    // 1. Đổi ID trong bảng people
+    const { error: err1 } = await supabase
+        .from('people')
+        .update({ handle: newHandle })
+        .eq('handle', oldHandle);
+
+    if (err1) {
+        console.error('Lỗi khi đổi ID người:', err1.message);
+        return { error: err1.message };
+    }
+
+    // 2. Cập nhật ID mới nếu người này đang là cha hoặc mẹ
+    await supabase.from('families').update({ father_handle: newHandle }).eq('father_handle', oldHandle);
+    await supabase.from('families').update({ mother_handle: newHandle }).eq('mother_handle', oldHandle);
+
+    // 3. Cập nhật ID mới trong mảng children của các gia đình có chứa người này
+    const familiesWithChild = currentFamilies.filter(f => f.children.includes(oldHandle));
+    for (const fam of familiesWithChild) {
+        const newChildren = fam.children.map(ch => ch === oldHandle ? newHandle : ch);
+        await supabase.from('families').update({ children: newChildren }).eq('handle', fam.handle);
+    }
+
+    return { error: null };
+}
+
+/** Đổi mã Handle của một Gia đình */
+export async function changeFamilyHandle(oldHandle: string, newHandle: string, currentPeople: TreeNode[]): Promise<{ error: string | null }> {
+    const { error: err1 } = await supabase.from('families').update({ handle: newHandle }).eq('handle', oldHandle);
+    if (err1) return { error: err1.message };
+
+    // Cập nhật lại mảng families và parent_families của tất cả thành viên liên quan
+    for (const p of currentPeople) {
+        let updated = false;
+        let newFams = p.families;
+        let newParentFams = p.parentFamilies;
+
+        if (newFams.includes(oldHandle)) { newFams = newFams.map(f => f === oldHandle ? newHandle : f); updated = true; }
+        if (newParentFams.includes(oldHandle)) { newParentFams = newParentFams.map(f => f === oldHandle ? newHandle : f); updated = true; }
+
+        if (updated) await supabase.from('people').update({ families: newFams, parent_families: newParentFams }).eq('handle', p.handle);
+    }
+    return { error: null };
+}
+
+/** Cập nhật Cha/Mẹ cho Gia đình */
+export async function updateFamilyParents(
+    familyHandle: string, oldFather: string | undefined, newFather: string | undefined, 
+    oldMother: string | undefined, newMother: string | undefined, currentPeople: TreeNode[]
+) {
+    await supabase.from('families').update({ father_handle: newFather || null, mother_handle: newMother || null }).eq('handle', familyHandle);
+    const updates: Promise<any>[] = [];
+    
+    // Cập nhật mảng families cho Cha cũ & mới
+    if (oldFather && oldFather !== newFather) {
+        const p = currentPeople.find(x => x.handle === oldFather);
+        if (p) updates.push(supabase.from('people').update({ families: p.families.filter(f => f !== familyHandle) }).eq('handle', oldFather));
+    }
+    if (newFather && oldFather !== newFather) {
+        const p = currentPeople.find(x => x.handle === newFather);
+        if (p && !p.families.includes(familyHandle)) updates.push(supabase.from('people').update({ families: [...p.families, familyHandle] }).eq('handle', newFather));
+    }
+    // Cập nhật mảng families cho Mẹ cũ & mới
+    if (oldMother && oldMother !== newMother) {
+        const p = currentPeople.find(x => x.handle === oldMother);
+        if (p) updates.push(supabase.from('people').update({ families: p.families.filter(f => f !== familyHandle) }).eq('handle', oldMother));
+    }
+    if (newMother && oldMother !== newMother) {
+        const p = currentPeople.find(x => x.handle === newMother);
+        if (p && !p.families.includes(familyHandle)) updates.push(supabase.from('people').update({ families: [...p.families, familyHandle] }).eq('handle', newMother));
+    }
+    await Promise.all(updates);
+}
+
+/** Xóa Gia đình */
+export async function deleteFamily(handle: string): Promise<{ error: string | null }> {
+    const { error } = await supabase.from('families').delete().eq('handle', handle);
+    return { error: error ? error.message : null };
 }

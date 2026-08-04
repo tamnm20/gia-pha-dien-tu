@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback, useMemo, memo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/components/auth-provider';
 import { ContributeDialog } from '@/components/contribute-dialog';
-import { Search, ZoomIn, ZoomOut, Maximize2, TreePine, Eye, Users, GitBranch, User, ArrowDownToLine, ArrowUpFromLine, Crosshair, X, ChevronDown, ChevronRight, BarChart3, Package, Link, ChevronsDownUp, ChevronsUpDown, Copy, Pencil, Save, RotateCcw, Trash2, ArrowUp, ArrowDown, GripVertical, MessageSquarePlus } from 'lucide-react';
+import { Search, ZoomIn, ZoomOut, Maximize2, TreePine, Eye, Users, GitBranch, User, ArrowDownToLine, ArrowUpFromLine, Crosshair, X, ChevronDown, ChevronRight, BarChart3, Package, Link, ChevronsDownUp, ChevronsUpDown, Copy, Pencil, Save, RotateCcw, Trash2, ArrowUp, ArrowDown, GripVertical, MessageSquarePlus, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -16,6 +16,13 @@ import {
     removeChildFromFamily as supaRemoveChild,
     updatePersonLiving as supaUpdatePersonLiving,
     updatePerson as supaUpdatePerson,
+    addPerson as supaAddPerson,
+    deletePerson as supaDeletePerson, 
+    addFamily as supaAddFamily,
+    changePersonHandle as supaChangePersonHandle,
+    changeFamilyHandle as supaChangeFamilyHandle,
+    updateFamilyParents as supaUpdateFamilyParents,
+    deleteFamily as supaDeleteFamily
 } from '@/lib/supabase-data';
 import {
     computeLayout, filterAncestors, filterDescendants,
@@ -190,6 +197,9 @@ export default function TreeViewPage() {
     // Editor mode state
     const [editorMode, setEditorMode] = useState(false);
     const [selectedCard, setSelectedCard] = useState<string | null>(null);
+    const [selectedFamilyCard, setSelectedFamilyCard] = useState<string | null>(null);
+    const [draftPerson, setDraftPerson] = useState<TreeNode | null>(null);
+    const [draftFamily, setDraftFamily] = useState<TreeFamily | null>(null);
     const { isAdmin } = useAuth();
 
     // URL query param initialization + auto-collapse on initial load
@@ -590,6 +600,9 @@ export default function TreeViewPage() {
     const handleCardClick = useCallback((handle: string, x: number, y: number) => {
         if (editorMode) {
             setSelectedCard(handle);
+            setSelectedFamilyCard(null); // Giải quyết lỗi kẹt bảng Gia đình
+            setDraftPerson(null);
+            setDraftFamily(null);
             return;
         }
         setContextMenu({ handle, x, y });
@@ -756,7 +769,103 @@ export default function TreeViewPage() {
             setTimeout(() => setLinkCopied(false), 2000);
         });
     }, []);
+    // === XỬ LÝ THÊM THÀNH VIÊN MỚI (NHÁP) ===
+    const handleAddPerson = () => {
+        const defaultHandle = `P${Date.now().toString().slice(-4)}${Math.floor(Math.random() * 10)}`;
+        const customHandle = window.prompt('Nhập mã ID cho Thành viên mới (Ví dụ: P020):', defaultHandle);
+        
+        if (!customHandle) return; // Hủy bỏ nếu người dùng bấm Cancel
+        const newHandle = customHandle.trim();
 
+        if (treeData?.people.some(p => p.handle === newHandle)) {
+            alert('Mã ID này đã tồn tại! Vui lòng thử lại với mã khác.');
+            return;
+        }
+
+        // Tìm gia đình cha mẹ (nếu đang chọn 1 thành viên trên cây)
+        let initialGen = 1;
+        let initialParentFamilies: string[] = [];
+        if (selectedCard && treeData) {
+            const selectedPerson = treeData.people.find(p => p.handle === selectedCard);
+            if (selectedPerson) {
+                initialGen = (selectedPerson.generation || 1) + 1;
+                if (selectedPerson.families && selectedPerson.families.length > 0) {
+                    initialParentFamilies = [selectedPerson.families[0]];
+                }
+            }
+        }
+
+        // TẠO BẢN NHÁP - KHÔNG LƯU NGAY XUỐNG DATABASE
+        setDraftPerson({
+            handle: newHandle,
+            displayName: 'Thành viên mới',
+            gender: 1,
+            generation: initialGen,
+            isLiving: true,
+            isPrivacyFiltered: false,
+            isPatrilineal: true,
+            families: [],
+            parentFamilies: initialParentFamilies,
+        });
+        
+        // Reset các trạng thái khác để tránh kẹt giao diện
+        setEditorMode(true);
+        setSelectedCard(null);
+        setSelectedFamilyCard(null);
+        setDraftFamily(null);
+    };
+
+    // === XỬ LÝ THÊM GIA ĐÌNH MỚI (NHÁP) ===
+    const handleAddFamily = () => {
+        const defaultFamHandle = `F${Date.now().toString().slice(-4)}${Math.floor(Math.random() * 10)}`;
+        const customHandle = window.prompt('Nhập mã ID cho Gia đình mới (Ví dụ: F010):', defaultFamHandle);
+        
+        if (!customHandle) return; // Hủy bỏ nếu người dùng bấm Cancel
+        const newFamHandle = customHandle.trim();
+
+        if (treeData?.families.some(f => f.handle === newFamHandle)) {
+            alert('Mã Gia đình này đã tồn tại!');
+            return;
+        }
+
+        // TẠO BẢN NHÁP - KHÔNG LƯU NGAY XUỐNG DATABASE
+        setDraftFamily({
+            handle: newFamHandle,
+            fatherHandle: undefined,
+            motherHandle: undefined,
+            children: []
+        });
+        
+        // Reset các trạng thái khác để tránh kẹt giao diện
+        setEditorMode(true);
+        setSelectedFamilyCard(null);
+        setSelectedCard(null);
+        setDraftPerson(null);
+    };
+
+    // === XỬ LÝ XÓA THÀNH VIÊN ===
+    const handleDeletePerson = async (handle: string) => {
+        if (!confirm('Bạn có chắc chắn muốn xóa thành viên này? Hành động này không thể hoàn tác.')) {
+            return;
+        }
+
+        // 1. Xóa khỏi state UI
+        setTreeData(prev => {
+            if (!prev) return null;
+            return {
+                ...prev,
+                people: prev.people.filter(p => p.handle !== handle)
+            };
+        });
+        
+        setSelectedCard(null); // Đóng bảng Editor
+
+        // 2. Xóa khỏi Database
+        const { error } = await supaDeletePerson(handle);
+        if (error) {
+            alert('Lỗi khi xóa thành viên: ' + error);
+        }
+    };
     // Search results
     const searchResults = useMemo(() => {
         if (!searchQuery || !treeData) return [];
@@ -842,15 +951,38 @@ export default function TreeViewPage() {
                         <Button variant="outline" size="icon" className="h-8 w-8" onClick={fitAll}><Maximize2 className="h-3.5 w-3.5" /></Button>
                         <div className="w-px bg-border mx-0.5" />
                         {isAdmin && (
-                            <Button
-                                variant={editorMode ? 'default' : 'outline'}
-                                size="icon"
-                                className={`h-8 w-8 ${editorMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''}`}
-                                title={editorMode ? 'Tắt chỉnh sửa' : 'Chế độ chỉnh sửa'}
-                                onClick={() => { setEditorMode(m => !m); setSelectedCard(null); }}
-                            >
-                                <Pencil className="h-3.5 w-3.5" />
-                            </Button>
+                            <>
+                                {/* Nút Thêm Gia đình mới */}
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8 text-rose-600 hover:bg-rose-50 hover:text-rose-700 border-rose-200"
+                                    title="Thêm gia đình mới"
+                                    onClick={handleAddFamily}
+                                >
+                                    <Users className="h-4 w-4" />
+                                </Button>
+                                {/* Nút Thêm thành viên mới */}
+                                <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-8 w-8 text-green-600 hover:bg-green-50 hover:text-green-700 border-green-200"
+                                    title="Thêm thành viên mới"
+                                    onClick={handleAddPerson}
+                                >
+                                    <UserPlus className="h-4 w-4" />
+                                </Button>                               
+                                {/* Nút bật/tắt chế độ chỉnh sửa (giữ nguyên) */}
+                                <Button
+                                    variant={editorMode ? 'default' : 'outline'}
+                                    size="icon"
+                                    className={`h-8 w-8 ${editorMode ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''}`}
+                                    title={editorMode ? 'Tắt chỉnh sửa' : 'Chế độ chỉnh sửa'}
+                                    onClick={() => { setEditorMode(m => !m); setSelectedCard(null); }}
+                                >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                            </>
                         )}
                     </div>
                 </div>
@@ -988,7 +1120,30 @@ export default function TreeViewPage() {
                 {editorMode && (
                     <EditorPanel
                         selectedCard={selectedCard}
+                        selectedFamilyCard={selectedFamilyCard}
+                        draftPerson={draftPerson}
+                        draftFamily={draftFamily}
                         treeData={treeData}
+                        onDeletePerson={handleDeletePerson}
+                        // THÊM ĐOẠN NÀY ĐỂ XỬ LÝ ĐỔI ID
+                        onChangeHandle={async (oldHandle, newHandle) => {
+                            setTreeData(prev => {
+                                if (!prev) return null;
+                                return {
+                                    people: prev.people.map(p => p.handle === oldHandle ? { ...p, handle: newHandle } : p),
+                                    families: prev.families.map(f => ({
+                                        ...f,
+                                        fatherHandle: f.fatherHandle === oldHandle ? newHandle : f.fatherHandle,
+                                        motherHandle: f.motherHandle === oldHandle ? newHandle : f.motherHandle,
+                                        children: f.children.map(ch => ch === oldHandle ? newHandle : ch)
+                                    }))
+                                };
+                            });
+                            setSelectedCard(newHandle); // Giữ panel mở trên thẻ mới
+
+                            const { error } = await supaChangePersonHandle(oldHandle, newHandle, treeData!.families);
+                            if (error) alert('Lỗi CSDL khi đổi ID: ' + error);
+                        }}
                         onReorderChildren={(familyHandle, newOrder) => {
                             setTreeData(prev => prev ? {
                                 ...prev,
@@ -1035,11 +1190,107 @@ export default function TreeViewPage() {
                             });
                             supaUpdatePerson(handle, fields);
                         }}
+                        // === THÊM 3 HÀM MỚI CHO GIA ĐÌNH ===
+                        onChangeFamilyHandle={async (oldHandle, newHandle) => {
+                            setTreeData(prev => {
+                                if (!prev) return null;
+                                return {
+                                    people: prev.people.map(p => ({
+                                        ...p,
+                                        families: p.families.map(f => f === oldHandle ? newHandle : f),
+                                        parentFamilies: p.parentFamilies.map(f => f === oldHandle ? newHandle : f)
+                                    })),
+                                    families: prev.families.map(f => f.handle === oldHandle ? { ...f, handle: newHandle } : f)
+                                };
+                            });
+                            setSelectedFamilyCard(newHandle);
+                            const { error } = await supaChangeFamilyHandle(oldHandle, newHandle, treeData!.people);
+                            if (error) alert('Lỗi khi đổi ID Gia đình: ' + error);
+                        }}
+                        onUpdateFamilyParents={async (famHandle, oldF, newF, oldM, newM) => {
+                            setTreeData(prev => {
+                                if (!prev) return null;
+                                // 1. Cập nhật trong bảng families
+                                const newFams = prev.families.map(f => f.handle === famHandle ? { ...f, fatherHandle: newF, motherHandle: newM } : f);
+                                // 2. Cập nhật mảng families của cha mẹ cũ/mới
+                                const newPeople = prev.people.map(p => {
+                                    let fams = [...p.families];
+                                    if (p.handle === oldF || p.handle === oldM) fams = fams.filter(id => id !== famHandle);
+                                    if ((p.handle === newF || p.handle === newM) && !fams.includes(famHandle)) fams.push(famHandle);
+                                    return { ...p, families: fams };
+                                });
+                                return { families: newFams, people: newPeople };
+                            });
+                            await supaUpdateFamilyParents(famHandle, oldF, newF, oldM, newM, treeData!.people);
+                        }}
+                        onDeleteFamily={async (famHandle) => {
+                            if (!confirm('Bạn có chắc chắn muốn xóa Gia đình này? Mối liên kết cha/mẹ/con của gia đình này sẽ bị ngắt.')) return;
+                            setTreeData(prev => {
+                                if (!prev) return null;
+                                return {
+                                    people: prev.people.map(p => ({
+                                        ...p,
+                                        families: p.families.filter(f => f !== famHandle),
+                                        parentFamilies: p.parentFamilies.filter(f => f !== famHandle)
+                                    })),
+                                    families: prev.families.filter(f => f.handle !== famHandle)
+                                };
+                            });
+                            setSelectedFamilyCard(null);
+                            setEditorMode(false);
+                            const { error } = await supaDeleteFamily(famHandle);
+                            if (error) alert('Lỗi xóa Gia đình: ' + error);
+                        }}
                         onReset={async () => {
                             const data = await fetchTreeData();
                             setTreeData(data);
                         }}
-                        onClose={() => { setEditorMode(false); setSelectedCard(null); }}
+                        // === THÊM HÀM LƯU NHÁP THÀNH VIÊN ===
+                        onSaveDraftPerson={async (person, fields) => {
+                            const finalPerson = { ...person, ...fields };
+                            setTreeData(prev => {
+                                if (!prev) return null;
+                                let updatedFams = prev.families;
+                                if (finalPerson.parentFamilies.length > 0) {
+                                    const targetF = finalPerson.parentFamilies[0];
+                                    updatedFams = prev.families.map(f => f.handle === targetF ? { ...f, children: [...f.children, finalPerson.handle] } : f);
+                                    supaUpdateFamilyChildren(targetF, [...(prev.families.find(f=>f.handle===targetF)?.children||[]), finalPerson.handle]);
+                                }
+                                return { ...prev, people: [...prev.people, finalPerson], families: updatedFams };
+                            });
+                            setDraftPerson(null);
+                            setSelectedCard(finalPerson.handle);
+                            await supaAddPerson(finalPerson);
+                        }}
+
+                        // === THÊM HÀM LƯU GIA ĐÌNH (MỚI & SỬA) ===
+                        onSaveFamily={async (family, newFather, newMother, isDraft) => {
+                            setTreeData(prev => {
+                                if (!prev) return null;
+                                const updatedFam = { ...family, fatherHandle: newFather, motherHandle: newMother };
+                                const newFams = isDraft ? [...prev.families, updatedFam] : prev.families.map(f => f.handle === family.handle ? updatedFam : f);
+                                const newPeople = prev.people.map(p => {
+                                    let fams = [...p.families];
+                                    if (!isDraft && (p.handle === family.fatherHandle || p.handle === family.motherHandle)) fams = fams.filter(id => id !== family.handle);
+                                    if ((p.handle === newFather || p.handle === newMother) && !fams.includes(family.handle)) fams.push(family.handle);
+                                    return { ...p, families: fams };
+                                });
+                                return { people: newPeople, families: newFams };
+                            });
+
+                            if (isDraft) {
+                                setDraftFamily(null);
+                                setSelectedFamilyCard(family.handle);
+                                await supaAddFamily(family);
+                            }
+                            await supaUpdateFamilyParents(family.handle, family.fatherHandle, newFather, family.motherHandle, newMother, treeData!.people);
+                        }}
+                        
+                        // Cập nhật onClose để xóa nháp nếu người dùng bấm dấu X hủy
+                        onClose={() => { 
+                            setEditorMode(false); setSelectedCard(null); setSelectedFamilyCard(null); 
+                            setDraftPerson(null); setDraftFamily(null); 
+                        }}
                     />
                 )}
             </div>
@@ -1502,300 +1753,524 @@ function StatsOverlay({ stats, onClose }: { stats: TreeStats; onClose: () => voi
 }
 
 // === Editor Panel Component ===
-function EditorPanel({ selectedCard, treeData, onReorderChildren, onMoveChild, onRemoveChild, onToggleLiving, onUpdatePerson, onReset, onClose }: {
+
+// ============================================================================
+// COMPONENT EDITOR PANEL (ĐÃ NÂNG CẤP TÍNH ĐỜI THỨ + SỬA GIA ĐÌNH TRỰC TIẾP)
+// ============================================================================
+function EditorPanel({ selectedCard, selectedFamilyCard, draftPerson, draftFamily, treeData, onDeletePerson, onChangeHandle, onReorderChildren, onMoveChild, onRemoveChild, onToggleLiving, onUpdatePerson, onChangeFamilyHandle, onUpdateFamilyParents, onDeleteFamily, onSaveDraftPerson, onSaveFamily, onReset, onClose }: {
     selectedCard: string | null;
+    selectedFamilyCard: string | null;
+    draftPerson: TreeNode | null;
+    draftFamily: TreeFamily | null;
     treeData: { people: TreeNode[]; families: TreeFamily[] } | null;
+    onDeletePerson: (handle: string) => void;
+    onChangeHandle: (oldHandle: string, newHandle: string) => void;
     onReorderChildren: (familyHandle: string, newOrder: string[]) => void;
     onMoveChild: (childHandle: string, fromFamily: string, toFamily: string) => void;
     onRemoveChild: (childHandle: string, familyHandle: string) => void;
     onToggleLiving: (handle: string, isLiving: boolean) => void;
     onUpdatePerson: (handle: string, fields: Record<string, unknown>) => void;
+    onChangeFamilyHandle: (oldHandle: string, newHandle: string) => void;
+    onUpdateFamilyParents: (famHandle: string, oldF: string | undefined, newF: string | undefined, oldM: string | undefined, newM: string | undefined) => void;
+    onDeleteFamily: (famHandle: string) => void;
+    onSaveDraftPerson: (person: TreeNode, fields: Record<string, unknown>) => void;
+    onSaveFamily: (family: TreeFamily, father: string | undefined, mother: string | undefined, isDraft: boolean) => void;
     onReset: () => void;
     onClose: () => void;
 }) {
+    // ---- STATE CHO NGƯỜI (PEOPLE) ----
+    const isDraftPerson = !!draftPerson;
+    const person = draftPerson || (selectedCard ? treeData?.people.find(p => p.handle === selectedCard) : null);
+    
     const [editName, setEditName] = useState('');
+    const [editGender, setEditGender] = useState<number>(1);
+    const [editGeneration, setEditGeneration] = useState<number>(1);
+    const [editIsPatrilineal, setEditIsPatrilineal] = useState<boolean>(true);
     const [editBirthYear, setEditBirthYear] = useState('');
     const [editDeathYear, setEditDeathYear] = useState('');
+    const [editIsLiving, setEditIsLiving] = useState<boolean>(true);
+    const [editParentFamily, setEditParentFamily] = useState<string>('');
     const [dirty, setDirty] = useState(false);
     const [saving, setSaving] = useState(false);
+    
     const [parentSearch, setParentSearch] = useState('');
     const [showParentDropdown, setShowParentDropdown] = useState(false);
     const parentSearchRef = useRef<HTMLDivElement>(null);
 
-    if (!treeData) return null;
+    // ---- STATE CHO GIA ĐÌNH (FAMILIES) ----
+    const isDraftFamily = !!draftFamily;
+    const family = draftFamily || (selectedFamilyCard ? treeData?.families.find(f => f.handle === selectedFamilyCard) : null);
+    
+    const [editFamFather, setEditFamFather] = useState<string>('');
+    const [editFamMother, setEditFamMother] = useState<string>('');
+    const [famDirty, setFamDirty] = useState(false);
 
-    const person = selectedCard ? treeData.people.find(p => p.handle === selectedCard) : null;
-
-    // Sync local state when selection changes
-    // eslint-disable-next-line react-hooks/rules-of-hooks
+    // ---- ĐỒNG BỘ STATE KHI CHỌN CARD ----
     useEffect(() => {
         if (person) {
             setEditName(person.displayName || '');
+            setEditGender(person.gender ?? 1);
+            setEditGeneration(person.generation ?? 1);
+            setEditIsPatrilineal(person.isPatrilineal ?? true);
             setEditBirthYear(person.birthYear?.toString() || '');
             setEditDeathYear(person.deathYear?.toString() || '');
-            setDirty(false);
+            setEditIsLiving(person.isLiving ?? true);
+            setEditParentFamily(person.parentFamilies?.[0] || '');
+            setDirty(isDraftPerson);
             setParentSearch('');
             setShowParentDropdown(false);
         }
-    }, [person?.handle]);
+    }, [person?.handle, isDraftPerson]);
 
-    // Close parent dropdown on outside click
-    // eslint-disable-next-line react-hooks/rules-of-hooks
     useEffect(() => {
-        const handleClickOutside = (e: MouseEvent) => {
-            if (parentSearchRef.current && !parentSearchRef.current.contains(e.target as Node)) {
-                setShowParentDropdown(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-    }, []);
+        if (family) {
+            setEditFamFather(family.fatherHandle || '');
+            setEditFamMother(family.motherHandle || '');
+            setFamDirty(isDraftFamily);
+        }
+    }, [family?.handle, isDraftFamily]);
 
-    // Find the family where this person is a parent
-    const parentFamily = person
-        ? treeData.families.find(f => f.fatherHandle === person.handle || f.motherHandle === person.handle)
-        : null;
-
-    // Find the family where this person is a child
-    const childOfFamily = person
-        ? treeData.families.find(f => f.children.includes(person.handle))
-        : null;
-
-    // Get parent person name
-    const parentPerson = childOfFamily
-        ? treeData.people.find(p => p.handle === childOfFamily.fatherHandle || p.handle === childOfFamily.motherHandle)
-        : null;
-
-    // Children of the selected person's family
-    const children = parentFamily
-        ? parentFamily.children.map(ch => treeData.people.find(p => p.handle === ch)).filter(Boolean) as TreeNode[]
-        : [];
-
-    // All families (for "change parent" dropdown) with labels
-    const allParentFamilies = treeData.families.filter(f => f.fatherHandle || f.motherHandle);
-    const parentFamiliesWithLabels = allParentFamilies.map(f => {
-        const father = treeData.people.find(p => p.handle === f.fatherHandle);
-        const gen = father ? (father as any).generation : '';
-        const label = father ? father.displayName : f.handle;
-        return { ...f, label, gen };
-    });
-
-    // Filter parent families by search term
-    const filteredParentFamilies = parentSearch.trim()
-        ? parentFamiliesWithLabels.filter(f =>
-            f.label.toLowerCase().includes(parentSearch.toLowerCase()) ||
-            f.handle.toLowerCase().includes(parentSearch.toLowerCase())
-        )
-        : parentFamiliesWithLabels;
-
-    const handleSave = async () => {
+    // ---- HÀM LƯU DỮ LIỆU NGƯỜI ----
+    const handleSavePerson = async () => {
         if (!person || !dirty) return;
         setSaving(true);
         const fields: Record<string, unknown> = {};
+
         if (editName !== person.displayName) fields.displayName = editName;
+        if (editGender !== person.gender) fields.gender = editGender;
+        if (editGeneration !== person.generation) fields.generation = editGeneration;
+        if (editIsPatrilineal !== person.isPatrilineal) fields.isPatrilineal = editIsPatrilineal;
+        if (editIsLiving !== (person.isLiving ?? true)) fields.isLiving = editIsLiving;
+
         const newBirth = editBirthYear ? parseInt(editBirthYear) : null;
         if (newBirth !== (person.birthYear ?? null)) fields.birthYear = newBirth;
+
         const newDeath = editDeathYear ? parseInt(editDeathYear) : null;
         if (newDeath !== (person.deathYear ?? null)) fields.deathYear = newDeath;
-        if (Object.keys(fields).length > 0) {
+
+        if (isDraftPerson && editParentFamily !== (person.parentFamilies?.[0] || '')) {
+            fields.parentFamilies = editParentFamily ? [editParentFamily] : [];
+        }
+
+        if (isDraftPerson) {
+            onSaveDraftPerson(person, fields);
+        } else if (Object.keys(fields).length > 0) {
             onUpdatePerson(person.handle, fields);
         }
+        
         setDirty(false);
         setSaving(false);
     };
 
-    return (
-        <div className="w-72 bg-background border-l flex flex-col overflow-hidden flex-shrink-0">
-            {/* Header */}
-            <div className="flex items-center justify-between px-3 py-2 border-b bg-blue-50">
-                <div className="flex items-center gap-2">
-                    <Pencil className="h-4 w-4 text-blue-600" />
-                    <span className="text-sm font-semibold text-blue-800">Chỉnh sửa</span>
-                </div>
-                <div className="flex gap-1">
-                    <button onClick={onReset} title="Khôi phục gốc" className="p-1 rounded hover:bg-blue-100 text-blue-600">
-                        <RotateCcw className="h-3.5 w-3.5" />
-                    </button>
-                    <button onClick={onClose} className="p-1 rounded hover:bg-blue-100 text-blue-600">
-                        <X className="h-3.5 w-3.5" />
-                    </button>
-                </div>
-            </div>
+    if (!treeData) return null;
 
-            {!person ? (
-                <div className="flex-1 flex items-center justify-center p-4">
-                    <p className="text-sm text-muted-foreground text-center">
-                        Nhấn vào một card trên cây để chọn và chỉnh sửa
-                    </p>
+    // ==========================================
+    // 1. GIAO DIỆN CHỈNH SỬA BẢNG GIA ĐÌNH ĐỘC LẬP
+    // ==========================================
+    if (family) {
+        return (
+            <div className="w-80 bg-background border-l flex flex-col overflow-hidden flex-shrink-0">
+                <div className="flex items-center justify-between px-3 py-2 border-b bg-rose-50">
+                    <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4 text-rose-600" />
+                        <span className="text-sm font-semibold text-rose-800">
+                            {isDraftFamily ? 'Tạo Gia đình mới' : 'Chỉnh sửa Gia đình'}
+                        </span>
+                    </div>
+                    <button onClick={onClose} className="p-1 rounded hover:bg-rose-100 text-rose-600"><X className="h-3.5 w-3.5" /></button>
                 </div>
-            ) : (
-                <div className="flex-1 overflow-y-auto">
-                    {/* Editable person info */}
-                    <div className="p-3 border-b space-y-2">
-                        <p className="text-xs text-muted-foreground">Đời {(person as any).generation ?? '?'} · {person.handle}</p>
-                        {parentPerson && (
-                            <p className="text-xs text-muted-foreground">
-                                Cha: <span className="font-medium text-foreground">{parentPerson.displayName}</span>
-                            </p>
-                        )}
 
-                        {/* Editable Name */}
-                        <div>
-                            <label className="text-xs text-muted-foreground">Họ tên</label>
-                            <input className="w-full border rounded px-2 py-1 text-sm bg-background" value={editName}
-                                onChange={e => { setEditName(e.target.value); setDirty(true); }} />
+                <div className="flex-1 overflow-y-auto p-3 space-y-4">
+                    {/* Handle ID */}
+                    <div>
+                        <label className="text-xs font-medium text-muted-foreground block mb-1">Mã định danh (handle)</label>
+                        <div className="flex items-center bg-slate-50 border rounded px-2 py-1.5 text-xs text-foreground">
+                            <strong className="flex-1">{family.handle}</strong>
+                            {!isDraftFamily && (
+                                <button type="button" className="p-1 bg-white hover:bg-rose-100 text-rose-600 rounded shadow-sm border"
+                                    onClick={() => {
+                                        const newId = window.prompt('Nhập mã handle mới:', family.handle);
+                                        if (newId && newId.trim() !== family.handle) {
+                                            if (treeData.families.some(f => f.handle === newId.trim())) alert('Mã đã tồn tại!');
+                                            else onChangeFamilyHandle(family.handle, newId.trim());
+                                        }
+                                    }}><Pencil className="h-3 w-3" />
+                                </button>
+                            )}
                         </div>
+                    </div>
 
-                        {/* Birth / Death Year */}
-                        <div className="flex gap-2">
-                            <div className="flex-1">
-                                <label className="text-xs text-muted-foreground">Năm sinh</label>
-                                <input type="number" className="w-full border rounded px-2 py-1 text-sm bg-background" value={editBirthYear}
-                                    onChange={e => { setEditBirthYear(e.target.value); setDirty(true); }} placeholder="—" />
+                    {/* Father / Mother */}
+                    <div>
+                        <label className="text-xs font-medium text-muted-foreground block mb-1">Người Cha (father_handle)</label>
+                        <select className="w-full border rounded px-2 py-1.5 text-xs bg-background"
+                            value={editFamFather}
+                            onChange={(e) => { setEditFamFather(e.target.value); setFamDirty(true); }}>
+                            <option value="">-- Bỏ trống --</option>
+                            {treeData.people.filter(p => p.gender === 1).map(p => (
+                                <option key={p.handle} value={p.handle}>{p.displayName} ({p.handle})</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-xs font-medium text-muted-foreground block mb-1">Người Mẹ (mother_handle)</label>
+                        <select className="w-full border rounded px-2 py-1.5 text-xs bg-background"
+                            value={editFamMother}
+                            onChange={(e) => { setEditFamMother(e.target.value); setFamDirty(true); }}>
+                            <option value="">-- Bỏ trống --</option>
+                            {treeData.people.filter(p => p.gender === 2).map(p => (
+                                <option key={p.handle} value={p.handle}>{p.displayName} ({p.handle})</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Nút lưu */}
+                    {famDirty && (
+                        <button type="button" 
+                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm"
+                            onClick={() => {
+                                onSaveFamily(family, editFamFather || undefined, editFamMother || undefined, isDraftFamily);
+                                setFamDirty(false);
+                            }}>
+                            <Save className="h-4 w-4" /> {isDraftFamily ? 'LƯU TẠO MỚI GIA ĐÌNH' : 'LƯU THAY ĐỔI CHA MẸ'}
+                        </button>
+                    )}
+
+                    {/* Children */}
+                    <div className="pt-2 border-t mt-4">
+                        <label className="text-xs font-medium text-muted-foreground block mb-2">Các con (children)</label>
+                        {isDraftFamily ? (
+                            <div className="text-[11px] bg-blue-50 text-blue-700 p-2 rounded border border-blue-100">
+                                Vui lòng bấm <strong>Lưu tạo mới gia đình</strong>. Sau đó bạn có thể thêm/xóa thành viên.
                             </div>
-                            <div className="flex-1">
-                                <label className="text-xs text-muted-foreground">Năm mất</label>
-                                <input type="number" className="w-full border rounded px-2 py-1 text-sm bg-background" value={editDeathYear}
-                                    onChange={e => { setEditDeathYear(e.target.value); setDirty(true); }} placeholder="—" />
-                            </div>
-                        </div>
-
-                        {/* Living status */}
-                        <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">Trạng thái:</span>
-                            <button
-                                className={`text-xs px-2 py-0.5 rounded-full font-medium transition-colors ${person.isLiving
-                                    ? 'bg-green-100 text-green-700 hover:bg-green-200'
-                                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                                    }`}
-                                onClick={() => onToggleLiving(person.handle, !person.isLiving)}
-                            >
-                                {person.isLiving ? '● Còn sống' : '○ Đã mất'}
-                            </button>
-                        </div>
-
-                        {/* Save button */}
-                        {dirty && (
-                            <button
-                                className="w-full flex items-center justify-center gap-1 px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-                                onClick={handleSave} disabled={saving}
-                            >
-                                <Save className="h-3.5 w-3.5" />{saving ? 'Đang lưu...' : 'Lưu thay đổi → Supabase'}
-                            </button>
+                        ) : (
+                            <>
+                                <div className="space-y-1 mb-2 max-h-40 overflow-y-auto">
+                                    {family.children.length === 0 && <span className="text-[11px] text-muted-foreground italic">Mảng children đang trống</span>}
+                                    {family.children.map(ch => {
+                                        const childPerson = treeData.people.find(p => p.handle === ch);
+                                        return (
+                                            <div key={ch} className="flex justify-between items-center bg-slate-50 border p-1.5 rounded text-xs">
+                                                <span className="truncate pr-2 font-medium">{childPerson?.displayName || ch}</span>
+                                                <button className="text-red-500 hover:bg-red-100 p-1 rounded transition-colors" 
+                                                    title="Xóa con" onClick={() => onRemoveChild(ch, family.handle)}>
+                                                    <Trash2 className="h-3 w-3" />
+                                                </button>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                                <select className="w-full border rounded px-2 py-1.5 text-xs bg-background text-blue-600 font-medium mt-2"
+                                    value=""
+                                    onChange={(e) => {
+                                        if (e.target.value) {
+                                            const oldFam = treeData.families.find(f => f.children.includes(e.target.value))?.handle || '';
+                                            onMoveChild(e.target.value, oldFam, family.handle);
+                                        }
+                                    }}>
+                                    <option value="">+ Thêm con (PUSH vào children)...</option>
+                                    {treeData.people.filter(p => !family.children.includes(p.handle)).map(p => (
+                                        <option key={p.handle} value={p.handle} className="text-foreground">{p.displayName} ({p.handle})</option>
+                                    ))}
+                                </select>
+                            </>
                         )}
                     </div>
 
-                    {/* Children reorder */}
-                    {parentFamily && children.length > 0 && (
-                        <div className="p-3 border-b">
-                            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-                                Con ({children.length})
-                            </p>
-                            <div className="space-y-1">
-                                {children.map((child, idx) => (
-                                    <div key={child.handle} className="flex items-center gap-1 group">
-                                        <GripVertical className="h-3 w-3 text-muted-foreground/40" />
-                                        <span className="flex-1 text-xs truncate">{child.displayName}</span>
-                                        <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            {idx > 0 && (
-                                                <button
-                                                    className="p-0.5 rounded hover:bg-muted"
-                                                    title="Lên"
-                                                    onClick={() => {
-                                                        const newOrder = [...parentFamily.children];
-                                                        [newOrder[idx - 1], newOrder[idx]] = [newOrder[idx], newOrder[idx - 1]];
-                                                        onReorderChildren(parentFamily.handle, newOrder);
-                                                    }}
-                                                >
-                                                    <ArrowUp className="h-3 w-3" />
-                                                </button>
-                                            )}
-                                            {idx < children.length - 1 && (
-                                                <button
-                                                    className="p-0.5 rounded hover:bg-muted"
-                                                    title="Xuống"
-                                                    onClick={() => {
-                                                        const newOrder = [...parentFamily.children];
-                                                        [newOrder[idx], newOrder[idx + 1]] = [newOrder[idx + 1], newOrder[idx]];
-                                                        onReorderChildren(parentFamily.handle, newOrder);
-                                                    }}
-                                                >
-                                                    <ArrowDown className="h-3 w-3" />
-                                                </button>
-                                            )}
-                                            <button
-                                                className="p-0.5 rounded hover:bg-red-100 text-red-500"
-                                                title="Xóa liên kết"
-                                                onClick={() => {
-                                                    if (confirm(`Xóa "${child.displayName}" khỏi danh sách con?`)) {
-                                                        onRemoveChild(child.handle, parentFamily.handle);
-                                                    }
-                                                }}
-                                            >
-                                                <Trash2 className="h-3 w-3" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Change parent — searchable */}
-                    {childOfFamily && (
-                        <div className="p-3 border-b" ref={parentSearchRef}>
-                            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-                                Đổi cha
-                            </p>
-                            {/* Current parent display */}
-                            <p className="text-xs text-muted-foreground mb-1">
-                                Hiện tại: <span className="font-medium text-foreground">{parentPerson?.displayName ?? childOfFamily.handle}</span>
-                            </p>
-                            {/* Searchable input */}
-                            <div className="relative">
-                                <input
-                                    type="text"
-                                    className="w-full border rounded px-2 py-1 text-xs bg-background placeholder:text-muted-foreground/60"
-                                    placeholder="🔍 Tìm cha mới..."
-                                    value={parentSearch}
-                                    onChange={e => { setParentSearch(e.target.value); setShowParentDropdown(true); }}
-                                    onFocus={() => setShowParentDropdown(true)}
-                                />
-                                {showParentDropdown && (
-                                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-background border rounded shadow-lg max-h-48 overflow-y-auto">
-                                        {filteredParentFamilies.length === 0 ? (
-                                            <div className="px-2 py-2 text-xs text-muted-foreground text-center">
-                                                Không tìm thấy
-                                            </div>
-                                        ) : (
-                                            filteredParentFamilies.map(f => {
-                                                const isSelected = f.handle === childOfFamily.handle;
-                                                return (
-                                                    <button
-                                                        key={f.handle}
-                                                        className={`w-full text-left px-2 py-1.5 text-xs hover:bg-blue-50 flex items-center gap-1 transition-colors ${isSelected ? 'bg-blue-100 font-semibold text-blue-700' : ''}`}
-                                                        onClick={() => {
-                                                            if (f.handle !== childOfFamily.handle) {
-                                                                onMoveChild(person.handle, childOfFamily.handle, f.handle);
-                                                            }
-                                                            setShowParentDropdown(false);
-                                                            setParentSearch('');
-                                                        }}
-                                                    >
-                                                        <span className="truncate flex-1">{f.label}</span>
-                                                        <span className="text-muted-foreground/60 shrink-0">Đ{f.gen}</span>
-                                                        {isSelected && <span className="text-blue-600 shrink-0">✓</span>}
-                                                    </button>
-                                                );
-                                            })
-                                        )}
-                                    </div>
-                                )}
-                            </div>
+                    {!isDraftFamily && (
+                        <div className="pt-4 mt-auto">
+                            <button type="button" className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded bg-white text-red-600 border border-red-200 hover:bg-red-50 transition-colors shadow-sm"
+                                onClick={() => onDeleteFamily(family.handle)}>
+                                <Trash2 className="h-4 w-4" /> Xóa Gia đình này
+                            </button>
                         </div>
                     )}
                 </div>
-            )}
-        </div>
-    );
+            </div>
+        );
+    }
+
+    // ==========================================
+    // 2. GIAO DIỆN CHỈNH SỬA BẢNG NGƯỜI (PEOPLE)
+    // ==========================================
+    if (person) {
+        const parentFamily = treeData.families.find(f => f.fatherHandle === person.handle || f.motherHandle === person.handle);
+        const childOfFamily = treeData.families.find(f => f.children.includes(person.handle) || (isDraftPerson && person.parentFamilies.includes(f.handle)));
+        
+        const allParentFamilies = treeData.families.filter(f => f.fatherHandle || f.motherHandle);
+        const parentFamiliesWithLabels = allParentFamilies.map(f => {
+            const father = treeData.people.find(p => p.handle === f.fatherHandle);
+            return { ...f, label: father ? father.displayName : f.handle, gen: father ? (father as any).generation : '' };
+        });
+        const filteredParentFamilies = parentSearch.trim() ? parentFamiliesWithLabels.filter(f => f.label.toLowerCase().includes(parentSearch.toLowerCase()) || f.handle.toLowerCase().includes(parentSearch.toLowerCase())) : parentFamiliesWithLabels;
+
+        return (
+            <div className="w-80 bg-background border-l flex flex-col overflow-hidden flex-shrink-0">
+                <div className="flex items-center justify-between px-3 py-2 border-b bg-blue-50">
+                    <div className="flex items-center gap-2">
+                        <Pencil className="h-4 w-4 text-blue-600" />
+                        <span className="text-sm font-semibold text-blue-800">
+                            {isDraftPerson ? 'Thêm Thành viên mới' : 'Chỉnh sửa Thành viên'}
+                        </span>
+                    </div>
+                    <button onClick={onClose} className="p-1 rounded hover:bg-blue-100 text-blue-600"><X className="h-3.5 w-3.5" /></button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                    {/* Handle */}
+                    <div>
+                        <label className="text-xs font-medium text-muted-foreground block mb-1">Mã định danh (handle)</label>
+                        <div className="flex justify-between items-center bg-slate-50 border rounded px-2 py-1 text-xs">
+                            <strong className="text-foreground">{person.handle}</strong>
+                            {!isDraftPerson && (
+                                <button type="button" className="p-1 bg-white hover:bg-blue-100 text-blue-600 rounded border shadow-sm"
+                                    onClick={() => {
+                                        const newId = window.prompt('Nhập mã handle mới:', person.handle);
+                                        if (newId && newId.trim() !== person.handle) {
+                                            if (treeData.people.some(p => p.handle === newId.trim())) alert('Mã đã tồn tại!');
+                                            else onChangeHandle(person.handle, newId.trim());
+                                        }
+                                    }}><Pencil className="h-3 w-3" />
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Tên */}
+                    <div>
+                        <label className="text-xs font-medium text-muted-foreground">Họ và tên (display_name)</label>
+                        <input className="w-full border rounded px-2 py-1.5 text-sm bg-background mt-0.5"
+                            value={editName} onChange={e => { setEditName(e.target.value); setDirty(true); }} />
+                    </div>
+
+                    {/* Giới tính & Đời thứ */}
+                    <div className="flex gap-2">
+                        <div className="flex-1">
+                            <label className="text-xs font-medium text-muted-foreground">Giới tính (gender)</label>
+                            <select className="w-full border rounded px-2 py-1.5 text-xs bg-background mt-0.5"
+                                value={editGender} onChange={e => { setEditGender(Number(e.target.value)); setDirty(true); }}>
+                                <option value={1}>Nam (1)</option>
+                                <option value={2}>Nữ (2)</option>
+                            </select>
+                        </div>
+                        <div className="flex-1">
+                            <label className="text-xs font-medium text-muted-foreground">Đời thứ (generation)</label>
+                            <input type="number" className="w-full border rounded px-2 py-1.5 text-xs bg-background mt-0.5"
+                                value={editGeneration} onChange={e => { setEditGeneration(Number(e.target.value)); setDirty(true); }} />
+                        </div>
+                    </div>
+
+                    {/* Năm sinh / mất */}
+                    <div className="flex gap-2">
+                        <div className="flex-1">
+                            <label className="text-xs font-medium text-muted-foreground">Năm sinh (birth_year)</label>
+                            <input type="number" className="w-full border rounded px-2 py-1.5 text-xs bg-background mt-0.5"
+                                value={editBirthYear} onChange={e => { setEditBirthYear(e.target.value); setDirty(true); }} placeholder="—" />
+                        </div>
+                        <div className="flex-1">
+                            <label className="text-xs font-medium text-muted-foreground">Năm mất (death_year)</label>
+                            <input type="number" className="w-full border rounded px-2 py-1.5 text-xs bg-background mt-0.5"
+                                value={editDeathYear} onChange={e => { setEditDeathYear(e.target.value); setDirty(true); }} placeholder="—" />
+                        </div>
+                    </div>
+
+                    {/* Sống / Dòng tộc */}
+                    <div className="flex items-center gap-2 pt-1 border-t mt-2">
+                        <div className="flex-1">
+                            <label className="text-xs font-medium text-muted-foreground block mb-1">Trạng thái (is_living)</label>
+                            <button type="button"
+                                className={`w-full text-xs px-2 py-1.5 rounded font-medium border transition-colors ${editIsLiving ? 'bg-green-50 border-green-200 text-green-700' : 'bg-slate-100 border-slate-200 text-slate-500'}`}
+                                onClick={() => { setEditIsLiving(!editIsLiving); setDirty(true); }}>
+                                {editIsLiving ? '● Còn sống' : '○ Đã mất'}
+                            </button>
+                        </div>
+                        <div className="flex-1">
+                            <label className="text-xs font-medium text-muted-foreground block mb-1">Dòng tộc (is_patrilineal)</label>
+                            <select className="w-full border rounded px-2 py-1.5 text-xs bg-background"
+                                value={editIsPatrilineal ? 'true' : 'false'} onChange={e => { setEditIsPatrilineal(e.target.value === 'true'); setDirty(true); }}>
+                                <option value="true">Chính tộc</option>
+                                <option value="false">Ngoại tộc</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    {/* TÍNH NĂNG 1: Tự động cập nhật Đời thứ khi chọn Cha/Mẹ lúc tạo mới */}
+                    <div className="pt-2 border-t mt-2" ref={parentSearchRef}>
+                        <label className="text-xs font-medium text-muted-foreground block mb-2">Làm con của gia đình (parent_families)</label>
+                        {isDraftPerson ? (
+                            <select className="w-full border rounded px-2 py-1.5 text-xs bg-background"
+                                value={editParentFamily}
+                                onChange={e => { 
+                                    const newFamId = e.target.value;
+                                    setEditParentFamily(newFamId); 
+                                    setDirty(true); 
+
+                                    // Auto-calculate generation (Đời cha mẹ + 1)
+                                    if (newFamId && treeData) {
+                                        const fam = treeData.families.find(f => f.handle === newFamId);
+                                        if (fam) {
+                                            const parentHandle = fam.fatherHandle || fam.motherHandle;
+                                            if (parentHandle) {
+                                                const parentObj = treeData.people.find(p => p.handle === parentHandle);
+                                                if (parentObj && parentObj.generation) {
+                                                    setEditGeneration(parentObj.generation + 1);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }}>
+                                <option value="">-- Không có (Tổ tiên) --</option>
+                                {treeData.families.map(f => (
+                                    <option key={f.handle} value={f.handle}>
+                                        {f.handle} (Cha: {treeData.people.find(p => p.handle === f.fatherHandle)?.displayName || '?'})
+                                    </option>
+                                ))}
+                            </select>
+                        ) : (
+                            <div className="relative">
+                                <input type="text" className="w-full border rounded px-2 py-1.5 text-xs bg-background placeholder:text-muted-foreground/60"
+                                    placeholder="🔍 Tìm gia đình cha mới..."
+                                    value={parentSearch} onChange={e => { setParentSearch(e.target.value); setShowParentDropdown(true); }}
+                                    onFocus={() => setShowParentDropdown(true)} />
+                                {showParentDropdown && (
+                                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-background border rounded shadow-lg max-h-48 overflow-y-auto">
+                                        {filteredParentFamilies.map(f => (
+                                            <button key={f.handle} type="button"
+                                                className="w-full text-left px-2 py-1.5 text-xs hover:bg-blue-50 flex items-center gap-1 transition-colors"
+                                                onClick={() => {
+                                                    onMoveChild(person.handle, childOfFamily ? childOfFamily.handle : '', f.handle);
+                                                    setShowParentDropdown(false);
+                                                }}>
+                                                <span className="truncate flex-1">{f.label} ({f.handle})</span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* NÚT LƯU THÔNG TIN THÀNH VIÊN */}
+                    {dirty && (
+                        <button className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-bold rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors shadow-sm my-2"
+                            onClick={handleSavePerson} disabled={saving}>
+                            <Save className="h-4 w-4" />
+                            {saving ? 'ĐANG LƯU...' : (isDraftPerson ? 'LƯU THÀNH VIÊN MỚI' : 'LƯU CÁC THAY ĐỔI')}
+                        </button>
+                    )}
+
+                    {/* TÍNH NĂNG 2: CHỈNH SỬA GIA ĐÌNH NGAY TRONG BẢNG NGƯỜI */}
+                    <div className="pt-2 border-t mt-2">
+                        <label className="text-xs font-medium text-muted-foreground block mb-2">Đã lập gia đình (families)</label>
+                        {isDraftPerson ? (
+                            <div className="text-[11px] bg-slate-50 text-slate-500 p-2 rounded border">
+                                Vui lòng lưu thành viên trước khi chỉnh sửa gia đình.
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {person.families.length === 0 && <span className="text-[11px] text-muted-foreground italic">Chưa lập gia đình</span>}
+                                
+                                {person.families.map(fId => {
+                                    const famObj = treeData.families.find(f => f.handle === fId);
+                                    if (!famObj) return null;
+                                    
+                                    return (
+                                        <div key={fId} className="border border-blue-200 rounded bg-blue-50/40 p-2 space-y-2">
+                                            {/* Tiêu đề ID Gia đình */}
+                                            <div className="flex justify-between items-center border-b border-blue-100 pb-1">
+                                                <span className="font-semibold text-blue-800 text-[11px] flex items-center gap-1">
+                                                    <Users className="h-3 w-3" /> Gia đình: {fId}
+                                                </span>
+                                            </div>
+                                            
+                                            {/* Sửa Cha / Mẹ */}
+                                            <div className="grid grid-cols-2 gap-2">
+                                                <div>
+                                                    <label className="text-[10px] font-medium text-muted-foreground block mb-0.5">Người Cha</label>
+                                                    <select className="w-full border border-slate-200 rounded px-1 py-1 text-[11px] bg-white"
+                                                        value={famObj.fatherHandle || ''}
+                                                        onChange={(e) => onUpdateFamilyParents(fId, famObj.fatherHandle, e.target.value || undefined, famObj.motherHandle, famObj.motherHandle)}>
+                                                        <option value="">-- Trống --</option>
+                                                        {treeData.people.filter(p => p.gender === 1).map(p => (
+                                                            <option key={p.handle} value={p.handle}>{p.displayName}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="text-[10px] font-medium text-muted-foreground block mb-0.5">Người Mẹ</label>
+                                                    <select className="w-full border border-slate-200 rounded px-1 py-1 text-[11px] bg-white"
+                                                        value={famObj.motherHandle || ''}
+                                                        onChange={(e) => onUpdateFamilyParents(fId, famObj.fatherHandle, famObj.fatherHandle, famObj.motherHandle, e.target.value || undefined)}>
+                                                        <option value="">-- Trống --</option>
+                                                        {treeData.people.filter(p => p.gender === 2).map(p => (
+                                                            <option key={p.handle} value={p.handle}>{p.displayName}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            {/* Sửa / Xóa Con */}
+                                            <div className="pt-1">
+                                                <label className="text-[10px] font-medium text-muted-foreground block mb-1">Các con ({famObj.children.length})</label>
+                                                <div className="space-y-1 max-h-32 overflow-y-auto">
+                                                    {famObj.children.length === 0 && <div className="text-[10px] text-muted-foreground italic">Chưa có con</div>}
+                                                    {famObj.children.map(ch => {
+                                                        const childPerson = treeData.people.find(p => p.handle === ch);
+                                                        return (
+                                                            <div key={ch} className="flex justify-between items-center bg-white border border-slate-200 p-1 rounded text-[11px] group">
+                                                                <span className="truncate pr-1 font-medium">{childPerson?.displayName || ch}</span>
+                                                                <button className="text-red-500 opacity-50 hover:opacity-100 hover:bg-red-50 p-0.5 rounded transition-all" 
+                                                                    title="Xóa con khỏi gia đình" onClick={() => onRemoveChild(ch, fId)}>
+                                                                    <Trash2 className="h-3 w-3" />
+                                                                </button>
+                                                            </div>
+                                                        )
+                                                    })}
+                                                </div>
+                                                {/* Select Thêm Con Trực Tiếp */}
+                                                <select className="w-full border border-blue-200 rounded px-1 py-1 text-[11px] bg-white text-blue-600 font-medium mt-1"
+                                                    value=""
+                                                    onChange={(e) => {
+                                                        if (e.target.value) {
+                                                            const oldFam = treeData.families.find(f => f.children.includes(e.target.value))?.handle || '';
+                                                            onMoveChild(e.target.value, oldFam, fId);
+                                                        }
+                                                    }}>
+                                                    <option value="">+ Tìm & thêm con vào GĐ này...</option>
+                                                    {treeData.people.filter(p => !famObj.children.includes(p.handle)).map(p => (
+                                                        <option key={p.handle} value={p.handle}>{p.displayName} ({p.handle})</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            {/* === NÚT XÓA GIA ĐÌNH MỚI ĐƯỢC THÊM VÀO ĐÂY === */}
+                                            <div className="pt-1.5 mt-1 border-t border-blue-100/50">
+                                                <button type="button" 
+                                                    className="w-full flex items-center justify-center gap-1 px-2 py-1.5 text-[10px] font-semibold rounded bg-white text-red-600 border border-red-100 hover:bg-red-50 hover:border-red-300 transition-colors shadow-sm"
+                                                    onClick={() => onDeleteFamily(fId)}>
+                                                    <Trash2 className="h-3 w-3" /> Xóa Gia đình này
+                                                </button>
+                                            </div>
+
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+                    </div>
+                    {/* Nút Xóa Thành Viên */}
+                    {!isDraftPerson && (
+                        <div className="pt-4 mt-auto border-t">
+                            <button type="button" className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded bg-white text-red-600 border border-red-200 hover:bg-red-50 transition-colors shadow-sm"
+                                onClick={() => onDeletePerson(person.handle)}>
+                                <Trash2 className="h-4 w-4" /> Xóa thành viên này
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
+    return null;
 }

@@ -52,14 +52,72 @@ export default function AdminEditsPage() {
         if (!authLoading && isAdmin) fetchContributions();
     }, [authLoading, isAdmin, fetchContributions, router]);
 
+    // HÀM XỬ LÝ DUYỆT / TỪ CHỐI ĐÓNG GÓP
     const handleAction = async (id: string, action: 'approved' | 'rejected') => {
         setProcessingId(id);
-        await supabase.from('contributions').update({
-            status: action,
-            admin_note: adminNotes[id] || null,
-            reviewed_by: user?.id,
-            reviewed_at: new Date().toISOString(),
-        }).eq('id', id);
+        const adminNote = adminNotes[id] || null;
+        
+        // Tìm thông tin của bản ghi đóng góp đang thao tác
+        const contribution = contributions.find(c => c.id === id);
+
+        if (!contribution) {
+            setProcessingId(null);
+            return;
+        }
+
+        // 1. NẾU BẤM DUYỆT -> CẬP NHẬT TRỰC TIẾP VÀO BẢNG `people`
+        if (action === 'approved') {
+            const targetHandle = contribution.person_handle;
+            let fieldName = contribution.field_name;
+            const rawValue = contribution.new_value;
+
+            if (!targetHandle || !fieldName || rawValue === undefined || rawValue === null) {
+                alert('Lỗi: Bản ghi đóng góp bị thiếu person_handle hoặc field_name!');
+                setProcessingId(null);
+                return;
+            }
+
+            // Map lại tên cột nếu form khác DB (ví dụ form gửi 'address' nhưng DB là 'current_address')
+            if (fieldName === 'address') fieldName = 'current_address';
+
+            // Ép kiểu số cho các trường dạng số nguyên
+            const isNumericField = ['birth_year', 'death_year', 'generation', 'gender', 'chi'].includes(fieldName);
+            const finalValue = isNumericField ? parseInt(rawValue, 10) : rawValue.trim();
+
+            // Thực hiện UPDATE vào bảng people
+            const { error: peopleError } = await supabase
+                .from('people')
+                .update({ [fieldName]: finalValue })
+                .eq('handle', targetHandle);
+
+            if (peopleError) {
+                console.error('Lỗi update bảng people:', peopleError);
+                alert(`Lỗi CSDL khi ghi vào bảng people: ${peopleError.message}`);
+                setProcessingId(null);
+                return; // Nếu lỗi bảng people thì dừng lại, không chuyển trạng thái thành approved
+            }
+        }
+
+        // 2. CẬP NHẬT TRẠNG THÁI VÀO BẢNG `contributions`
+        const { error: contributionError } = await supabase
+            .from('contributions')
+            .update({
+                status: action,
+                admin_note: adminNote,
+                reviewed_by: user?.id,
+                reviewed_at: new Date().toISOString(),
+            })
+            .eq('id', id);
+
+        if (contributionError) {
+            console.error('Lỗi update trạng thái contributions:', contributionError);
+            alert(`Lỗi cập nhật bảng đóng góp: ${contributionError.message}`);
+        } else {
+            alert(action === 'approved' 
+                ? `✅ Đã duyệt và lưu thành công "${contribution.field_label}: ${contribution.new_value}" vào hồ sơ!` 
+                : 'Đã từ chối đóng góp.');
+        }
+
         setProcessingId(null);
         fetchContributions();
     };
@@ -160,7 +218,7 @@ export default function AdminEditsPage() {
                                                 value={adminNotes[c.id] || ''}
                                                 onChange={e => setAdminNotes(prev => ({ ...prev, [c.id]: e.target.value }))}
                                             />
-                                            <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700"
+                                            <Button size="sm" className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white"
                                                 disabled={processingId === c.id}
                                                 onClick={() => handleAction(c.id, 'approved')}>
                                                 <Check className="w-3 h-3 mr-1" /> Duyệt
