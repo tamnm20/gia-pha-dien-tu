@@ -345,6 +345,7 @@ export async function changeFamilyHandle(oldHandle: string, newHandle: string, c
 }
 
 /** Cập nhật Cha/Mẹ cho Gia đình */
+/** Cập nhật Cha/Mẹ cho Gia đình */
 export async function updateFamilyParents(
     familyHandle: string, oldFather: string | undefined, newFather: string | undefined, 
     oldMother: string | undefined, newMother: string | undefined, currentPeople: TreeNode[]
@@ -355,21 +356,22 @@ export async function updateFamilyParents(
     // Cập nhật mảng families cho Cha cũ & mới
     if (oldFather && oldFather !== newFather) {
         const p = currentPeople.find(x => x.handle === oldFather);
-        if (p) updates.push(supabase.from('people').update({ families: p.families.filter(f => f !== familyHandle) }).eq('handle', oldFather));
+        if (p) updates.push((async () => { await supabase.from('people').update({ families: p.families.filter(f => f !== familyHandle) }).eq('handle', oldFather); })());
     }
     if (newFather && oldFather !== newFather) {
         const p = currentPeople.find(x => x.handle === newFather);
-        if (p && !p.families.includes(familyHandle)) updates.push(supabase.from('people').update({ families: [...p.families, familyHandle] }).eq('handle', newFather));
+        if (p && !p.families.includes(familyHandle)) updates.push((async () => { await supabase.from('people').update({ families: [...p.families, familyHandle] }).eq('handle', newFather); })());
     }
     // Cập nhật mảng families cho Mẹ cũ & mới
     if (oldMother && oldMother !== newMother) {
         const p = currentPeople.find(x => x.handle === oldMother);
-        if (p) updates.push(supabase.from('people').update({ families: p.families.filter(f => f !== familyHandle) }).eq('handle', oldMother));
+        if (p) updates.push((async () => { await supabase.from('people').update({ families: p.families.filter(f => f !== familyHandle) }).eq('handle', oldMother); })());
     }
     if (newMother && oldMother !== newMother) {
         const p = currentPeople.find(x => x.handle === newMother);
-        if (p && !p.families.includes(familyHandle)) updates.push(supabase.from('people').update({ families: [...p.families, familyHandle] }).eq('handle', newMother));
+        if (p && !p.families.includes(familyHandle)) updates.push((async () => { await supabase.from('people').update({ families: [...p.families, familyHandle] }).eq('handle', newMother); })());
     }
+    
     await Promise.all(updates);
 }
 
