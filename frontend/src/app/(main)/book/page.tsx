@@ -165,7 +165,7 @@ export default function BookPage() {
             });
             // ═══ KẾT THÚC LOGIC SẮP XẾP ═══
 
-            const familyName = people.length > 0 ? (people[0].displayName?.split(' ').slice(0, 2).join(' ') || 'Dòng Họ') : 'Dòng Họ';
+            const familyName = people.length > 0 ? (people[0].displayName?.split(' ').slice(0, 1).join(' ') || 'Dòng Họ') : 'Dòng Họ';
             const data = generateBookData(people, families, familyName);
             
             // ÉP CỨNG TRẬT TỰ MỘT LẦN NỮA: Đề phòng thuật toán tạo sách làm loạn
