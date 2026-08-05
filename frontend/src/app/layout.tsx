@@ -16,6 +16,11 @@ export const metadata: Metadata = {
   title: "Gia Phả Điện Tử",
   description: "Ứng dụng quản lý gia phả dòng họ",
   manifest: "/manifest.json", // Trỏ đến file manifest
+  icons :
+    {
+      icon: "/favicon.ico",
+    }
+  ,
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
